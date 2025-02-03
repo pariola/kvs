@@ -1,0 +1,12 @@
+[package]
+name = "kvs"
+version = "0.1.0"
+authors = ["Blessing Pariola <blessing@pario.la>"]
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.27", features = ["derive"] }
+
+[dev-dependencies]
+assert_cmd = "2.0.16"
+predicates = "3.1.3"
