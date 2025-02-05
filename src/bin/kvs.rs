@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
-use std::process::exit;
+use std::{env, process::exit};
+
+use kvs::{KvStore, KvsError, Result};
 
 #[derive(Parser)]
 #[command(name = "kvs")]
@@ -32,30 +34,59 @@ enum Commands {
         key: String,
     },
 
-    #[command(about = "Remove a given key")]
+    #[command(name = "rm", about = "Remove a given key")]
     Remove {
         #[arg(value_name = "KEY", required = true, help = "A string key")]
         key: String,
     },
 }
 
-fn main() {
+fn main() -> Result<()> {
     let args = Cli::parse();
 
+    let mut exit_code = 0;
+
+    let mut store = KvStore::open(env::current_dir()?)?;
+
     match args.command {
-        Commands::Set { key: _, value: _ } => {
-            eprintln!("unimplemented");
-            exit(1);
-        }
+        Commands::Get { key } => match store.get(key) {
+            Ok(None) => {
+                println!("Key not found");
+            }
 
-        Commands::Get { key: _ } => {
-            eprintln!("unimplemented");
-            exit(1);
-        }
+            Ok(Some(value)) => {
+                println!("{value}");
+            }
 
-        Commands::Remove { key: _ } => {
-            eprintln!("unimplemented");
-            exit(1);
-        }
-    }
+            Err(err) => {
+                exit_code = -1;
+                println!("unhandled err: {:?}", err);
+            }
+        },
+
+        Commands::Set { key, value } => match store.set(key, value) {
+            Ok(_) => {}
+
+            Err(err) => {
+                exit_code = -1;
+                println!("unhandled err: {:?}", err);
+            }
+        },
+
+        Commands::Remove { key } => match store.remove(key) {
+            Ok(_) => {}
+
+            Err(KvsError::KeyNotFound) => {
+                exit_code = -1;
+                println!("Key not found");
+            }
+
+            Err(err) => {
+                exit_code = -1;
+                println!("unhandled err: {:?}", err);
+            }
+        },
+    };
+
+    exit(exit_code)
 }
