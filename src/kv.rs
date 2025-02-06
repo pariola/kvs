@@ -12,14 +12,13 @@ use crate::{KvsError, Result};
 ///
 /// Key/value pairs are stored in a `HashMap` in memory and not persisted to disk.
 pub struct KvStore {
-    path: PathBuf,
-
     buf: BufWriter<File>,
 
     offset: u64,
     segment: u64,
 
     index: HashMap<String, (u64, u64)>,
+    readers: HashMap<u64, BufReader<File>>,
 }
 
 impl KvStore {
@@ -32,9 +31,10 @@ impl KvStore {
 
         let segments = sorted_segments(&path)?;
         let mut index = HashMap::new();
+        let mut readers = HashMap::new();
 
         for &segment in &segments {
-            load_segment(&path, segment, &mut index)?;
+            load_segment(&path, segment, &mut index, &mut readers)?;
         }
 
         let segment = segments.last().unwrap_or(&0) + 1;
@@ -43,11 +43,11 @@ impl KvStore {
         let buf = new_segment(&path, segment)?;
 
         Ok(KvStore {
-            path,
             buf,
             offset: 0,
             segment,
             index,
+            readers,
         })
     }
 
@@ -91,13 +91,13 @@ impl KvStore {
     /// Gets the string value of a given string key.
     ///
     /// Returns `None` if the given key does not exist.
-    pub fn get(&self, key: String) -> Result<Option<String>> {
+    pub fn get(&mut self, key: String) -> Result<Option<String>> {
         if !self.index.contains_key(&key) {
             return Ok(None);
         }
 
         let (segment, offset) = self.index.get(&key).unwrap();
-        Ok(read_value(&self.path, *segment, *offset)?)
+        Ok(read_value(&mut self.readers, *segment, *offset)?)
     }
 }
 
@@ -119,8 +119,16 @@ fn new_segment(path: &Path, segment: u64) -> Result<BufWriter<File>> {
 }
 
 /// Reads a value from a specific offset in a segment file
-fn read_value(path: &Path, segment: u64, offset: u64) -> Result<Option<String>> {
-    let mut reader = BufReader::new(File::open(segment_path(&path, segment))?);
+fn read_value(
+    readers: &mut HashMap<u64, BufReader<File>>,
+    segment: u64,
+    offset: u64,
+) -> Result<Option<String>> {
+    let reader = match readers.get_mut(&segment) {
+        None => return Ok(None),
+        Some(reader) => reader,
+    };
+
     reader.seek(SeekFrom::Start(offset))?;
 
     let mut stream = serde_json::Deserializer::from_reader(reader).into_iter::<Command>();
@@ -135,12 +143,18 @@ fn read_value(path: &Path, segment: u64, offset: u64) -> Result<Option<String>> 
     Ok(None)
 }
 
-/// Loads a segment file into the index map
-fn load_segment(path: &Path, segment: u64, index: &mut HashMap<String, (u64, u64)>) -> Result<()> {
-    let mut offset: u64 = 0;
-    let reader = BufReader::new(File::open(segment_path(&path, segment))?);
-    let mut stream = serde_json::Deserializer::from_reader(reader).into_iter::<Command>();
 
+/// Loads a segment file into the index map
+fn load_segment(
+    path: &Path,
+    segment: u64,
+    index: &mut HashMap<String, (u64, u64)>,
+    readers: &mut HashMap<u64, BufReader<File>>,
+) -> Result<()> {
+    let reader = BufReader::new(File::open(segment_path(&path, segment))?);
+    let mut stream = serde_json::Deserializer::from_reader(reader.get_ref()).into_iter::<Command>();
+
+    let mut offset: u64 = 0;
     while let Some(cmd) = stream.next() {
         match cmd? {
             Command::Set { key, value: _ } => {
@@ -154,6 +168,8 @@ fn load_segment(path: &Path, segment: u64, index: &mut HashMap<String, (u64, u64
 
         offset = stream.byte_offset() as u64;
     }
+
+    readers.insert(segment, reader);
 
     Ok(())
 }

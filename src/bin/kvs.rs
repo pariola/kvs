@@ -65,17 +65,14 @@ fn main() -> Result<()> {
         },
 
         Commands::Set { key, value } => match store.set(key, value) {
-            Ok(_) => {}
-
             Err(err) => {
                 exit_code = -1;
                 println!("unhandled err: {:?}", err);
             }
+            _ => {}
         },
 
         Commands::Remove { key } => match store.remove(key) {
-            Ok(_) => {}
-
             Err(KvsError::KeyNotFound) => {
                 exit_code = -1;
                 println!("Key not found");
@@ -85,6 +82,8 @@ fn main() -> Result<()> {
                 exit_code = -1;
                 println!("unhandled err: {:?}", err);
             }
+
+            _ => {}
         },
     };
 
